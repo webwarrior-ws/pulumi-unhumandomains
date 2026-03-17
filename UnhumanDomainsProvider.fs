@@ -120,7 +120,8 @@ type UnhumanDomainsProvider(managementToken: string) =
                     "resources": {
                         "%s" : {
                             "properties": %s,
-                            "inputProperties": %s
+                            "inputProperties": %s,
+                            "requiredInputs": [ "domainName" ]
                         }
                     },
                     "types": %s,
@@ -149,16 +150,43 @@ type UnhumanDomainsProvider(managementToken: string) =
         Task.FromResult <| ConfigureResponse()
    
     override self.Check (request: CheckRequest, ct: CancellationToken): Task<CheckResponse> = 
-        if request.Type = domainRecordResourceName then
-            // TODO: implement
-            let failures = Array.empty
+        if request.Type = domainRecordResourceName then 
+            let hasDnsRecords, dnsRecords = request.NewInputs.TryGetValue "records"
+            let hasNameservers = request.NewInputs.ContainsKey "nameservers"
+            let failures = 
+                match hasDnsRecords, hasNameservers with
+                | true, true | false, false ->
+                    CheckFailure("records|nameservers", "Either 'records' or 'nameservers' must be specified, but not both") 
+                    |> Array.singleton
+                | true, false ->
+                    match dnsRecords.TryGetMap() with
+                    | true, dnsRecordsObject ->
+                        match dnsRecordsObject.TryGetValue "type" with
+                        | true, typ when typ.TryGetString() = (true, "A") || typ.TryGetString() = (true, "AAAA") ->
+                            if not <| dnsRecordsObject.ContainsKey "ip" then
+                                CheckFailure("records", "A/AAAA records must have 'ip' property") |> Array.singleton
+                            else
+                                Array.empty
+                        | true, typ when typ.TryGetString() = (true, "CNAME") ->
+                            if not <| dnsRecordsObject.ContainsKey "target" then
+                                CheckFailure("records", "CNAME records must have 'target' property") |> Array.singleton
+                            else
+                                Array.empty
+                        | true, _ ->
+                            Array.empty
+                        | false, _ ->
+                            CheckFailure("records", "DNS record must have 'type' property") |> Array.singleton
+                    | false, _ ->
+                        CheckFailure("records", "'records' must be an object") 
+                        |> Array.singleton
+                | false, true ->
+                    Array.empty
             Task.FromResult <| CheckResponse(Inputs = request.NewInputs, Failures = failures)
         else
             failwith $"Unknown resource type '{request.Type}'"
 
     override self.Diff (request: DiffRequest, ct: CancellationToken): Task<DiffResponse> = 
         if request.Type = domainRecordResourceName then
-            // TODO: revise
             let diff = request.NewInputs.Except request.OldInputs 
             let replaces = diff |> Seq.map (fun pair -> pair.Key) |> Seq.toArray
             Task.FromResult <| DiffResponse(Changes = (replaces.Length > 0), Replaces = replaces)

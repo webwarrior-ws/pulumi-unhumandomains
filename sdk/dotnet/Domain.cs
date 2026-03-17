@@ -29,7 +29,7 @@ namespace Pulumi.Unhumandomains
         /// <param name="name">The unique name of the resource</param>
         /// <param name="args">The arguments used to populate this resource's properties</param>
         /// <param name="options">A bag of options that control this resource's behavior</param>
-        public Domain(string name, DomainArgs? args = null, CustomResourceOptions? options = null)
+        public Domain(string name, DomainArgs args, CustomResourceOptions? options = null)
             : base("unhumandomains:index:Domain", name, args ?? new DomainArgs(), MakeResourceOptions(options, ""))
         {
         }
@@ -66,8 +66,8 @@ namespace Pulumi.Unhumandomains
 
     public sealed class DomainArgs : global::Pulumi.ResourceArgs
     {
-        [Input("domainName")]
-        public Input<string>? DomainName { get; set; }
+        [Input("domainName", required: true)]
+        public Input<string> DomainName { get; set; } = null!;
 
         [Input("nameservers")]
         private InputList<string>? _nameservers;
