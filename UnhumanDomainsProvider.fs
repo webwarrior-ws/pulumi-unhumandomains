@@ -278,25 +278,34 @@ type UnhumanDomainsProvider(managementToken: string) =
                     CheckFailure("records|nameservers", "Either 'records' or 'nameservers' must be specified, but not both") 
                     |> Array.singleton
                 | true, false ->
-                    match dnsRecords.TryGetMap() with
-                    | true, dnsRecordsObject ->
-                        match dnsRecordsObject.TryGetValue "type" with
-                        | true, typ when typ.TryGetString() = (true, "A") || typ.TryGetString() = (true, "AAAA") ->
-                            if not <| dnsRecordsObject.ContainsKey "ip" then
-                                CheckFailure("records", "A/AAAA records must have 'ip' property") |> Array.singleton
-                            else
-                                Array.empty
-                        | true, typ when typ.TryGetString() = (true, "CNAME") ->
-                            if not <| dnsRecordsObject.ContainsKey "target" then
-                                CheckFailure("records", "CNAME records must have 'target' property") |> Array.singleton
-                            else
-                                Array.empty
-                        | true, _ ->
-                            Array.empty
-                        | false, _ ->
-                            CheckFailure("records", "DNS record must have 'type' property") |> Array.singleton
+                    match dnsRecords.TryGetArray() with
+                    | true, dnsRecordsArray ->
+                        dnsRecordsArray
+                        |> Seq.collect (fun dnsRecord ->
+                            match dnsRecord.TryGetMap() with
+                            | true, dnsRecordsObject ->
+                                match dnsRecordsObject.TryGetValue "type" with
+                                | true, typ when typ.TryGetString() = (true, "A") || typ.TryGetString() = (true, "AAAA") ->
+                                    if not <| dnsRecordsObject.ContainsKey "ip" then
+                                        CheckFailure("records", "A/AAAA records must have 'ip' property") |> Array.singleton
+                                    else
+                                        Array.empty
+                                | true, typ when typ.TryGetString() = (true, "CNAME") ->
+                                    if not <| dnsRecordsObject.ContainsKey "target" then
+                                        CheckFailure("records", "CNAME records must have 'target' property") |> Array.singleton
+                                    else
+                                        Array.empty
+                                | true, _ ->
+                                    Array.empty
+                                | false, _ ->
+                                    CheckFailure("records", "DNS record must have 'type' property") |> Array.singleton
+                            | false, _ ->
+                                CheckFailure("records", "Item of 'records' array must be an object") 
+                                |> Array.singleton
+                        )
+                        |> Seq.toArray
                     | false, _ ->
-                        CheckFailure("records", "'records' must be an object") 
+                        CheckFailure("records", "'records' must be an array") 
                         |> Array.singleton
                 | false, true ->
                     Array.empty
