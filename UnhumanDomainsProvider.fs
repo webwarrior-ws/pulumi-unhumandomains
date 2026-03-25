@@ -350,7 +350,8 @@ type UnhumanDomainsProvider(managementToken: string) =
             if request.Type = domainRecordResourceName then
                 let _, domainName = request.Properties.["domainName"].TryGetString()
                 do! self.AsyncSetDefaultNameservers domainName
-                do! self.AsyncSetDnsRecords domainName ImmutableArray.Empty
+                // Don't reset DNS records to empty because unhumandomains will give an error
+                // even though 'records' field is present and contains empty array ([]).
             else
                 failwith $"Unknown resource type '{request.Type}'"
         }
