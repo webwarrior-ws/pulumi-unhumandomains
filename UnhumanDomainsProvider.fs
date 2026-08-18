@@ -486,7 +486,16 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
                 | Some _ ->
                     let _, domainName = request.Properties.["domainName"].TryGetString()
                     do! self.AsyncSetDefaultNameservers domainName
-                    do! self.AsyncCreateOrUpdate ImmutableDictionary.Empty request.Properties
+
+                    let propertiesWithEmptyRecords =
+                        readOnlyDict
+                            [
+                                "domainName", PropertyValue domainName
+                                "records", PropertyValue ImmutableArray.Empty
+                            ]
+                        |> ImmutableDictionary.CreateRange
+                        
+                    do! self.AsyncCreateOrUpdate propertiesWithEmptyRecords request.Properties
             else
                 failwith $"Unknown resource type '{request.Type}'"
         }
