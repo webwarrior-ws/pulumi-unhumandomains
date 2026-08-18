@@ -171,6 +171,11 @@ type UnhumanDomainsProvider() =
                     Seq.append keptExisting newRecords
                 | None -> recordsToSet
 
+            // Don't set 'records' array to empty because unhumandomains will give an error
+            // even though 'records' field is present and contains empty array ([]).
+            if Seq.isEmpty updatedRecords then
+                return ()
+
             let payload = {| records = updatedRecords |}
             let payloadJson = JsonSerializer.Serialize payload
             Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/dns -> {payloadJson}"
@@ -444,8 +449,7 @@ type UnhumanDomainsProvider() =
                 | Some _ ->
                     let _, domainName = request.Properties.["domainName"].TryGetString()
                     do! self.AsyncSetDefaultNameservers domainName
-                    // Don't reset DNS records to empty because unhumandomains will give an error
-                    // even though 'records' field is present and contains empty array ([]).
+                    do! self.AsyncCreateOrUpdate ImmutableDictionary.Empty request.Properties
             else
                 failwith $"Unknown resource type '{request.Type}'"
         }
