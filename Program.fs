@@ -7,7 +7,7 @@ open Pulumi.UnhumanDomains
 
 [<EntryPoint>]
 let main args =
-    Provider.Serve(args, UnhumanDomainsProvider.Version, (fun _host -> new UnhumanDomainsProvider()), CancellationToken.None)
+    Provider.Serve(args, UnhumanDomainsProvider.Version, (fun host -> new UnhumanDomainsProvider(host)), CancellationToken.None)
     |> Async.AwaitTask
     |> Async.RunSynchronously
     0
