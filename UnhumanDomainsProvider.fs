@@ -14,7 +14,7 @@ open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
-type UnhumanDomainsProvider() =
+type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
     inherit Pulumi.Experimental.Provider.Provider()
 
     let mutable internalHttpClient:Option<HttpClient> = None
@@ -71,12 +71,19 @@ type UnhumanDomainsProvider() =
     
     member private this.AsyncGetDnsRecords(domainName: string): Async<Option<seq<IDictionary<string, PropertyValue>>>> =
         async {
-            Console.WriteLine $"[UnhumanDomains] GET /api/domains/{domainName}/dns"
+            do! 
+                host.LogAsync(LogRequest(LogSeverity.Info, $"[UnhumanDomains] GET /api/domains/{domainName}/dns"))
+                |> Async.AwaitTask
             let! dnsRecordsResponse = 
                 this.HttpClient.GetAsync($"{apiBaseUrl}/api/domains/{domainName}/dns")
                 |> Async.AwaitTask
             let! responseBody = dnsRecordsResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
-            Console.WriteLine $"[UnhumanDomains] GET /api/domains/{domainName}/dns <- {(int)dnsRecordsResponse.StatusCode} {responseBody}"
+            do! 
+                host.LogAsync(LogRequest(
+                    LogSeverity.Info,
+                    $"[UnhumanDomains] GET /api/domains/{domainName}/dns <- {(int)dnsRecordsResponse.StatusCode} {responseBody}")
+                )
+                |> Async.AwaitTask
             if dnsRecordsResponse.StatusCode = HttpStatusCode.Conflict then
                 // custom nameservers
                 return None
@@ -120,7 +127,12 @@ type UnhumanDomainsProvider() =
 
     member private this.AsyncSetDefaultNameservers (domainName: string): Async<unit> =
         async {
-            Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers (default)"
+            do! 
+                host.LogAsync(LogRequest(
+                    LogSeverity.Info,
+                    $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers (default)")
+                )
+                |> Async.AwaitTask
             let! useDefaultNameserversResponse = 
                 this.HttpClient.PutAsync(
                     $"{apiBaseUrl}/api/domains/{domainName}/nameservers",
@@ -128,7 +140,12 @@ type UnhumanDomainsProvider() =
                 )
                 |> Async.AwaitTask
             let! responseBody = useDefaultNameserversResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
-            Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers <- {(int)useDefaultNameserversResponse.StatusCode} {responseBody}"
+            do! 
+                host.LogAsync(LogRequest(
+                    LogSeverity.Info, 
+                    $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers <- {(int)useDefaultNameserversResponse.StatusCode} {responseBody}")
+                )
+                |> Async.AwaitTask
             if not useDefaultNameserversResponse.IsSuccessStatusCode then
                 return failwith $"Error swithching to default nameservers (status code {useDefaultNameserversResponse.StatusCode}):
 {responseBody}"
@@ -171,14 +188,31 @@ type UnhumanDomainsProvider() =
                     Seq.append keptExisting newRecords
                 | None -> recordsToSet
 
+            // Don't set 'records' array to empty because unhumandomains will give an error
+            // even though 'records' field is present and contains empty array ([]).
+            if Seq.isEmpty updatedRecords then
+                do! 
+                    host.LogAsync(LogRequest(
+                        LogSeverity.Info,
+                        $"[UnhumanDomains] 'records' array is empty, skipping PUT /api/domains/{domainName}/dns"))
+                    |> Async.AwaitTask
+                return ()
+
             let payload = {| records = updatedRecords |}
             let payloadJson = JsonSerializer.Serialize payload
-            Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/dns -> {payloadJson}"
+            do! 
+                host.LogAsync(LogRequest(LogSeverity.Info, $"[UnhumanDomains] PUT /api/domains/{domainName}/dns -> {payloadJson}"))
+                |> Async.AwaitTask
             let! putDnsRecordsResponse = 
                 this.HttpClient.PutAsync($"{apiBaseUrl}/api/domains/{domainName}/dns", Json.JsonContent.Create payload)
                 |> Async.AwaitTask
             let! responseBody = putDnsRecordsResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
-            Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/dns <- {(int)putDnsRecordsResponse.StatusCode} {responseBody}"
+            do! 
+                host.LogAsync(LogRequest(
+                    LogSeverity.Info,
+                    $"[UnhumanDomains] PUT /api/domains/{domainName}/dns <- {(int)putDnsRecordsResponse.StatusCode} {responseBody}")
+                )
+                |> Async.AwaitTask
             if not putDnsRecordsResponse.IsSuccessStatusCode then
                 let! responseBody = putDnsRecordsResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
                 return failwith $"Error setting DNS records (status code {putDnsRecordsResponse.StatusCode}):
@@ -189,12 +223,20 @@ type UnhumanDomainsProvider() =
         async {
             let payload = {| nameservers = nameservers |}
             let payloadJson = JsonSerializer.Serialize payload
-            Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers -> {payloadJson}"
+            do! 
+                host.LogAsync(LogRequest(
+                    LogSeverity.Info,
+                    $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers -> {payloadJson}"))
+                |> Async.AwaitTask
             let! putNameserversResponse = 
                 this.HttpClient.PutAsync($"{apiBaseUrl}/api/domains/{domainName}/nameservers", Json.JsonContent.Create payload)
                 |> Async.AwaitTask
             let! responseBody = putNameserversResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
-            Console.WriteLine $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers <- {(int)putNameserversResponse.StatusCode} {responseBody}"
+            do! 
+                host.LogAsync(LogRequest(
+                    LogSeverity.Info,
+                    $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers <- {(int)putNameserversResponse.StatusCode} {responseBody}"))
+                |> Async.AwaitTask
             if not putNameserversResponse.IsSuccessStatusCode then
                 let! responseBody = putNameserversResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
                 return failwith $"Error setting nameservers (status code {putNameserversResponse.StatusCode}):
@@ -444,8 +486,7 @@ type UnhumanDomainsProvider() =
                 | Some _ ->
                     let _, domainName = request.Properties.["domainName"].TryGetString()
                     do! self.AsyncSetDefaultNameservers domainName
-                    // Don't reset DNS records to empty because unhumandomains will give an error
-                    // even though 'records' field is present and contains empty array ([]).
+                    do! self.AsyncCreateOrUpdate ImmutableDictionary.Empty request.Properties
             else
                 failwith $"Unknown resource type '{request.Type}'"
         }
