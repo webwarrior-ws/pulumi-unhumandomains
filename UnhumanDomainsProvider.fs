@@ -14,10 +14,58 @@ open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
+type HttpRequestFailed(message: string, innerException: Exception) =
+    inherit Exception(message, innerException)
+
+type CustomHttpClient(host: Pulumi.Experimental.IEngine) =
+    let httpClient = new HttpClient()
+
+    member _.DefaultRequestHeaders = httpClient.DefaultRequestHeaders
+
+    member self.AsyncSend(message: HttpRequestMessage) =
+        async {
+            let! messageContent = 
+                match Option.ofObj message.Content with
+                | Some content -> content.ReadAsStringAsync() |> Async.AwaitTask
+                | None -> async { return String.Empty }
+            let logMessage = $"[UnhumanDomains] {message.Method} {message.RequestUri} {messageContent}"
+            do! 
+                host.LogAsync(LogRequest(LogSeverity.Info, logMessage))
+                |> Async.AwaitTask
+            try
+                return! httpClient.SendAsync message |> Async.AwaitTask
+            with
+            | innerEx ->
+                let message = $"HTTP(S) request {message.Method} {message.RequestUri} {message.Content} has failed."
+                return raise <| HttpRequestFailed(message, innerEx)
+        }
+
+    member self.AsyncGet(url: string) =
+        let message = new HttpRequestMessage(HttpMethod.Get, url)
+        self.AsyncSend message
+
+    member self.AsyncGetString(url: string) =
+        async {
+            let! response = self.AsyncGet url
+            if not response.IsSuccessStatusCode then
+                return raise <| HttpRequestException($"HTTP(S) request GET {url} has failed with status code {response.StatusCode}.")
+            else
+                return! response.Content.ReadAsStringAsync() |> Async.AwaitTask
+        }
+
+    member self.AsyncPut(url: string, content) =
+        let message = new HttpRequestMessage(HttpMethod.Put, url, Content = content)
+        self.AsyncSend message
+
+    member _.Dispose() = (httpClient :> IDisposable).Dispose()
+
+    interface IDisposable with
+        member self.Dispose() = self.Dispose()
+
 type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
     inherit Pulumi.Experimental.Provider.Provider()
 
-    let mutable internalHttpClient:Option<HttpClient> = None
+    let mutable internalHttpClient:Option<CustomHttpClient> = None
 
     static let domainRecordResourceName = "unhumandomains:index:Domain"
     static let apiBaseUrl = "https://unhuman.domains"
@@ -71,12 +119,7 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
     
     member private this.AsyncGetDnsRecords(domainName: string): Async<Option<seq<IDictionary<string, PropertyValue>>>> =
         async {
-            do! 
-                host.LogAsync(LogRequest(LogSeverity.Info, $"[UnhumanDomains] GET /api/domains/{domainName}/dns"))
-                |> Async.AwaitTask
-            let! dnsRecordsResponse = 
-                this.HttpClient.GetAsync($"{apiBaseUrl}/api/domains/{domainName}/dns")
-                |> Async.AwaitTask
+            let! dnsRecordsResponse = this.HttpClient.AsyncGet $"{apiBaseUrl}/api/domains/{domainName}/dns"
             let! responseBody = dnsRecordsResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
             do! 
                 host.LogAsync(LogRequest(
@@ -115,9 +158,7 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
 
     member private this.AsyncGetNameservers(domainName: string): Async<seq<string>> =
         async {
-            let! domainInfo = 
-                this.HttpClient.GetStringAsync($"{apiBaseUrl}/api/domains/{domainName}/info")
-                |> Async.AwaitTask
+            let! domainInfo = this.HttpClient.AsyncGetString $"{apiBaseUrl}/api/domains/{domainName}/info"
             let data = JsonDocument.Parse(domainInfo).RootElement.GetProperty "data"
             let nameservers = 
                 data.GetProperty("nameservers").EnumerateArray()
@@ -127,18 +168,11 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
 
     member private this.AsyncSetDefaultNameservers (domainName: string): Async<unit> =
         async {
-            do! 
-                host.LogAsync(LogRequest(
-                    LogSeverity.Info,
-                    $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers (default)")
-                )
-                |> Async.AwaitTask
             let! useDefaultNameserversResponse = 
-                this.HttpClient.PutAsync(
+                this.HttpClient.AsyncPut(
                     $"{apiBaseUrl}/api/domains/{domainName}/nameservers",
                     Json.JsonContent.Create {| useDefault = true |}
                 )
-                |> Async.AwaitTask
             let! responseBody = useDefaultNameserversResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
             do! 
                 host.LogAsync(LogRequest(
@@ -200,12 +234,8 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
 
             let payload = {| records = updatedRecords |}
             let payloadJson = JsonSerializer.Serialize payload
-            do! 
-                host.LogAsync(LogRequest(LogSeverity.Info, $"[UnhumanDomains] PUT /api/domains/{domainName}/dns -> {payloadJson}"))
-                |> Async.AwaitTask
             let! putDnsRecordsResponse = 
-                this.HttpClient.PutAsync($"{apiBaseUrl}/api/domains/{domainName}/dns", Json.JsonContent.Create payload)
-                |> Async.AwaitTask
+                this.HttpClient.AsyncPut($"{apiBaseUrl}/api/domains/{domainName}/dns", Json.JsonContent.Create payload)
             let! responseBody = putDnsRecordsResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
             do! 
                 host.LogAsync(LogRequest(
@@ -223,14 +253,8 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
         async {
             let payload = {| nameservers = nameservers |}
             let payloadJson = JsonSerializer.Serialize payload
-            do! 
-                host.LogAsync(LogRequest(
-                    LogSeverity.Info,
-                    $"[UnhumanDomains] PUT /api/domains/{domainName}/nameservers -> {payloadJson}"))
-                |> Async.AwaitTask
             let! putNameserversResponse = 
-                this.HttpClient.PutAsync($"{apiBaseUrl}/api/domains/{domainName}/nameservers", Json.JsonContent.Create payload)
-                |> Async.AwaitTask
+                this.HttpClient.AsyncPut($"{apiBaseUrl}/api/domains/{domainName}/nameservers", Json.JsonContent.Create payload)
             let! responseBody = putNameserversResponse.Content.ReadAsStringAsync() |> Async.AwaitTask
             do! 
                 host.LogAsync(LogRequest(
@@ -390,7 +414,7 @@ type UnhumanDomainsProvider(host: Pulumi.Experimental.IEngine) =
             | Some _ ->
                 failwith "Pulumi deployment should not call this.Configure() more than once?"
             | None ->
-                let newHttpClient = new HttpClient()
+                let newHttpClient = new CustomHttpClient(host)
                 newHttpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", apiToken)
                 internalHttpClient <- Some newHttpClient
         | None ->
